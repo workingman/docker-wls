@@ -1,0 +1,9 @@
+FROM workingman/domain:1221dev
+
+ENV APP_NAME="sample" \
+    APP_PKG_FILE="sample.war" \
+    APP_PKG_LOCATION="/u01/oracle"
+
+COPY container-scripts/* /u01/oracle/
+
+RUN wlst /u01/oracle/app-deploy.py

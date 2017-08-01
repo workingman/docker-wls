@@ -1,0 +1,59 @@
+version: 2
+services:
+  weblogic-admin:
+    image: 'registry-1.docker.io/workingman/my_wls_app:latest'
+    ports:
+      - '7001:7001/tcp'
+    environment:
+      - OCCS_PHASE_ID=0
+      - 'OCCS:availability=per-pool'
+      - 'OCCS:description=This is an example of a clustered weblogic server.'
+      - 'OCCS_HEALTHCHECK_HTTP=http://:7001/console/?timeout=10s&interval=30s'
+  weblogic-managed-server:
+    image: 'registry-1.docker.io/workingman/my_wls_app:latest'
+    ports:
+      - '7002:7002/tcp'
+      - '5556:5556/tcp'
+    environment:
+      - OCCS_PHASE_ID=1
+      - >-
+        OCCS_BACKEND_KEY={{ sd_deployment_containers_path "weblogic-admin" 7001
+        }}
+      - >-
+        OCCS_SELF_KEY={{ sd_deployment_containers_path "weblogic-managed-server"
+        5556 }}
+      - 'OCCS:description=This is the weblogic managed server.'
+      - 'occs:availability=per-pool'
+      - 'OCCS_HEALTHCHECK_HTTP=http://:7002/sample/?timeout=10s&interval=30s'
+    command: >-
+      bash -c "i=0;seconds=30; trap 'echo Exiting application; exit' SIGHUP
+      SIGINT SIGTERM; while [ $i -lt $seconds ]; do echo Waiting $i/$seconds!;
+      ((i=i+1)); sleep 1; done; export ADMIN_HOST=$(curl -s
+      172.17.0.1:9109/api/kv/${OCCS_BACKEND_KEY}?keys=true | sed -r -e
+      's/(\"|\\[|\\])//g' | xargs -iKEY bash -c 'curl -s
+      172.17.0.1:9109/api/kv/KEY?raw=true' | sed -r -e 's/^(.+):.+$/\\1/'); echo
+      ADMIN_HOST=${ADMIN_HOST}; export CONTAINER_ID=$(cat /proc/self/cgroup |
+      grep 'cpu:/' | sed -r 's/[0-9]+:cpu:.docker.//g'); export SELF=$(curl -s
+      172.17.0.1:9109/api/kv/${OCCS_SELF_KEY}/${CONTAINER_ID}?raw=true); export
+      NM_HOST=$(echo ${SELF} | sed -r -e 's/^(.+):.+$/\\1/'); export
+      NM_PORT=$(echo ${SELF} | sed -r -e 's/^.+:(.+)$/\\1/'); export
+      MS_HOST=${OCCS_HOSTIP}; echo CONTAINER_ID=${CONTAINER_ID}; echo
+      SELF=${SELF}; echo NM_HOST=${NM_HOST}; echo NM_PORT=${NM_PORT};
+      createServer.sh"
+  loadbalancer:
+    image: 'registry-1.docker.io/workingman/nginx-lb:0.2'
+    ports:
+      - '8080:80/tcp'
+    environment:
+      - OCCS_PHASE_ID=2
+      - KV_IP=172.17.0.1
+      - KV_PORT=9109
+      - 'OCCS_API_TOKEN={{api_token}}'
+      - >-
+        OCCS_BACKEND_KEY={{ sd_deployment_containers_path
+        "weblogic-managed-server" 7002 }}
+      - >-
+        OCCS:description=This is the load balancer to front the weblogic managed
+        servers.
+      - 'occs:availability=per-pool'
+      - 'OCCS_HEALTHCHECK_HTTP=http://:8080/sample/?timeout=10s&interval=30s'
